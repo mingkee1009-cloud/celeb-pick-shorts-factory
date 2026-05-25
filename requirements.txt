@@ -1,23 +1,9 @@
-# ============================================================
-#  Celeb Pick Shorts Factory -- Streamlit Cloud requirements
-#  Python 3.11 compatible
-#
-#  NOTE: faster-whisper replaces openai-whisper
-#        No torch dependency -- much lighter for cloud deploy
-# ============================================================
+# Streamlit Cloud requirements -- minimal safe version
+# faster-whisper removed: heavy deps (onnxruntime+ctranslate2+av) exceed 1GB free tier
+# Whisper transcription is optional -- users can type subtitles manually
 
-# Core UI
 streamlit>=1.35.0
-
-# Image processing (thumbnail preview)
 Pillow>=10.0.0
-
-# Whisper STT -- lightweight, no torch required
-faster-whisper>=1.0.0
-
-# Advanced options (optional -- gracefully degrades if not installed)
-yt-dlp>=2024.1.1
-
-# Utilities
 numpy>=1.24.0
 requests>=2.31.0
+yt-dlp>=2024.1.1
