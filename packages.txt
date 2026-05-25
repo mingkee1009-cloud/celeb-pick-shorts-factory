@@ -1,3 +1,2 @@
-# Streamlit Cloud system packages (apt-get)
 ffmpeg
 fonts-nanum
