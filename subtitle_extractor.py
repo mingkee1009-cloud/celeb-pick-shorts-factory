@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-subtitle_extractor.py — Whisper 기반 자막 자동 추출 모듈
+subtitle_extractor.py -- faster-whisper 기반 자막 자동 추출 모듈
 
-영상 → WAV 음성 추출 → Whisper 음성 인식 → 세그먼트 목록 반환
+영상 -> WAV 음성 추출 -> faster-whisper 음성 인식 -> 세그먼트 목록 반환
+
+openai-whisper 대비 장점:
+  - torch 의존성 없음 (Streamlit Cloud 호환)
+  - int8 양자화로 메모리 사용 최소화
+  - tiny 모델 약 75MB (CPU 실행)
 """
 
 import subprocess
 from pathlib import Path
 
 
-# ── 음성 추출 ─────────────────────────────────────────────────────────────────
+# -- 음성 추출 -----------------------------------------------------------------
 
 def extract_audio_wav(
     video_path: str,
@@ -18,7 +23,7 @@ def extract_audio_wav(
     ffmpeg: str = "ffmpeg",
     log_fn=None,
 ) -> bool:
-    """영상에서 16kHz 모노 WAV를 추출한다 (Whisper 입력 형식)."""
+    """영상에서 16kHz 모노 WAV 추출 (Whisper 입력 형식)."""
     if log_fn is None:
         log_fn = print
     try:
@@ -43,23 +48,24 @@ def extract_audio_wav(
         return False
 
 
-# ── Whisper 자막 추출 ─────────────────────────────────────────────────────────
+# -- faster-whisper 자막 추출 --------------------------------------------------
 
 def extract_subtitles(
     video_path: str,
     ffmpeg: str = "ffmpeg",
-    model_size: str = "tiny",   # 클라우드 메모리 절약: tiny(75MB) / base(290MB) / small(967MB)
+    model_size: str = "tiny",   # tiny(75MB) / base(145MB) / small(488MB)
     language: str = "ko",
     log_fn=None,
 ) -> dict:
     """
-    Whisper 로 영상 음성을 자막으로 변환한다.
+    faster-whisper 로 영상 음성을 자막으로 변환한다.
+    torch 불필요 -- Streamlit Cloud 무료 티어 호환.
 
     반환:
         {
             "success"  : bool,
             "segments" : [{"start": float, "end": float, "text": str}, ...],
-            "full_text": str,   # 줄바꿈으로 구분된 전체 자막
+            "full_text": str,
             "error"    : str,
         }
     """
@@ -70,13 +76,13 @@ def extract_subtitles(
         "success": False, "segments": [], "full_text": "", "error": "",
     }
 
-    # Whisper 설치 확인
+    # faster-whisper 설치 확인
     try:
-        import whisper
+        from faster_whisper import WhisperModel
     except ImportError:
         result["error"] = (
-            "openai-whisper 미설치\n"
-            "설치: pip install openai-whisper"
+            "faster-whisper 미설치\n"
+            "설치: pip install faster-whisper"
         )
         log_fn(f"[자막] {result['error']}")
         return result
@@ -87,19 +93,23 @@ def extract_subtitles(
         # 1) 음성 추출
         log_fn("[자막] 음성 추출 중...")
         if not extract_audio_wav(str(video_path), str(tmp_wav), ffmpeg, log_fn):
-            result["error"] = "음성 추출 실패 — ffmpeg 를 확인하세요."
+            result["error"] = "음성 추출 실패 -- ffmpeg 를 확인하세요."
             return result
 
-        # 2) Whisper 모델 로딩
-        log_fn(f"[자막] Whisper '{model_size}' 모델 로딩 중...")
-        model = whisper.load_model(model_size)
+        # 2) 모델 로딩 (CPU, int8 양자화 -- 메모리 최소화)
+        log_fn(f"[자막] faster-whisper '{model_size}' 모델 로딩 중...")
+        model = WhisperModel(
+            model_size,
+            device="cpu",
+            compute_type="int8",   # 메모리 절약
+        )
 
         # 3) 음성 인식
         log_fn("[자막] 음성 인식 중 (잠시 기다려주세요)...")
-        out = model.transcribe(
+        segments_gen, _info = model.transcribe(
             str(tmp_wav),
             language=language,
-            verbose=False,
+            beam_size=5,
             word_timestamps=False,
             condition_on_previous_text=True,
         )
@@ -107,13 +117,13 @@ def extract_subtitles(
         # 4) 세그먼트 정리
         segments: list[dict] = []
         texts: list[str] = []
-        for seg in out.get("segments", []):
-            text = (seg.get("text") or "").strip()
+        for seg in segments_gen:
+            text = (seg.text or "").strip()
             if not text:
                 continue
             segments.append({
-                "start": round(float(seg.get("start", 0)), 2),
-                "end":   round(float(seg.get("end", 0)), 2),
+                "start": round(float(seg.start), 2),
+                "end":   round(float(seg.end),   2),
                 "text":  text,
             })
             texts.append(text)
@@ -121,11 +131,11 @@ def extract_subtitles(
         result["success"]   = True
         result["segments"]  = segments
         result["full_text"] = "\n".join(texts)
-        log_fn(f"[자막] 인식 완료 — {len(segments)}개 구간")
+        log_fn(f"[자막] 인식 완료 -- {len(segments)}개 구간")
 
     except Exception as e:
         result["error"] = str(e)
-        log_fn(f"[자막] Whisper 오류: {e}")
+        log_fn(f"[자막] 오류: {e}")
 
     finally:
         try:
@@ -137,7 +147,7 @@ def extract_subtitles(
     return result
 
 
-# ── 자막 없을 때 균등 분배 헬퍼 ─────────────────────────────────────────────
+# -- 자막 없을 때 균등 분배 헬퍼 -----------------------------------------------
 
 def distribute_lines(
     lines: list[str],
@@ -166,7 +176,7 @@ def distribute_lines(
     return result
 
 
-# ── 타이밍 할당 (Whisper 세그먼트 vs 균등 분배) ──────────────────────────────
+# -- 타이밍 할당 (Whisper 세그먼트 vs 균등 분배) --------------------------------
 
 def assign_timing(
     lines: list[str],
@@ -174,8 +184,8 @@ def assign_timing(
     total_duration: float,
 ) -> list[tuple[float, float, str]]:
     """
-    줄 수 == 세그먼트 수 → Whisper 타이밍 사용
-    줄 수 다름         → 균등 분배
+    줄 수 == 세그먼트 수 -> Whisper 타이밍 사용
+    줄 수 다름          -> 균등 분배
     """
     clean = [l.strip() for l in lines if l.strip()]
     if not clean:

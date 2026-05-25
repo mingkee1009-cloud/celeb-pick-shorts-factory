@@ -1,23 +1,23 @@
 # ============================================================
-#  연예인 픽템 쇼츠 자막 공장 — Python 패키지 목록
-#  Streamlit Community Cloud 배포용
+#  Celeb Pick Shorts Factory -- Streamlit Cloud requirements
+#  Python 3.11 compatible
 #
-#  주의: torch 는 openai-whisper 의존성으로 자동 설치됨
-#        별도로 torch 를 추가하면 버전 충돌 가능 — 절대 추가 금지
+#  NOTE: faster-whisper replaces openai-whisper
+#        No torch dependency -- much lighter for cloud deploy
 # ============================================================
 
-# 핵심 UI
+# Core UI
 streamlit>=1.35.0
 
-# 영상 처리 (ffmpeg 바이너리는 packages.txt 에서 설치)
+# Image processing (thumbnail preview)
 Pillow>=10.0.0
 
-# 자막 자동 추출 (torch 는 자동으로 같이 설치됨)
-openai-whisper>=20231117
+# Whisper STT -- lightweight, no torch required
+faster-whisper>=1.0.0
 
-# 고급 옵션 전용 (원본 찾기, 후보 검색)
+# Advanced options (optional -- gracefully degrades if not installed)
 yt-dlp>=2024.1.1
 
-# 기타 유틸
+# Utilities
 numpy>=1.24.0
 requests>=2.31.0
